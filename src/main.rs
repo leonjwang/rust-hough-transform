@@ -120,25 +120,26 @@ fn dump_line_visualization(
     println!("# detected lines: {}", lines.len());
 
     for (_, line_coordinates) in lines {
-        let clipped_line_coordinates = clip_line_liang_barsky(
+        let res = clip_line_liang_barsky(
             (0, (img_width - 1) as i32, 0, (img_height - 1) as i32),
             line_coordinates,
-        )
-        .expect("Line from rho/theta should be inside visible area of image.");
-
-        draw_line_segment_mut(
-            img,
-            // be sure to not overflow height
-            (
-                clipped_line_coordinates.0 as f32,
-                (img_height as f32) - 1.0 - clipped_line_coordinates.1 as f32,
-            ),
-            (
-                clipped_line_coordinates.2 as f32,
-                (img_height as f32) - 1.0 - clipped_line_coordinates.3 as f32,
-            ),
-            LINE_COLOR,
         );
+
+        if let Some(clipped_line_coordinates) = res {
+            draw_line_segment_mut(
+                img,
+                // be sure to not overflow height
+                (
+                    clipped_line_coordinates.0 as f32,
+                    (img_height as f32) - 1.0 - clipped_line_coordinates.1 as f32,
+                ),
+                (
+                    clipped_line_coordinates.2 as f32,
+                    (img_height as f32) - 1.0 - clipped_line_coordinates.3 as f32,
+                ),
+                LINE_COLOR,
+            );
+        }
     }
 
     img.save(line_visualization_img_path)
