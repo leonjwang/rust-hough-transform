@@ -14,8 +14,10 @@ use image::{GenericImageView, ImageBuffer, Rgb, Rgba};
 use imageproc::drawing::draw_line_segment_mut;
 use nalgebra as na;
 
-const DETECT_COLOR: Rgba<u8> = Rgba([255, 0, 0, 255]); // TODO: Command Line Args?
-const THRESHOLD: f64 = 10.0;
+const DETECT_COLOR: Rgba<u8> = Rgba([180, 20, 40, 255]); // TODO: Dynamicly detect this from image
+const THRESHOLD: f64 = 50.0;
+
+const MIN_PIXEL_AMOUNT: f64 = 0.05; // Amount of canvas pixels registered to be detected as an image
 
 const LINE_COLOR: Rgba<u8> = Rgba([255, 0, 0, 255]);
 const WHITE: Rgba<u8> = Rgba([255, 255, 255, 255]);
@@ -288,20 +290,29 @@ fn should_detect(x: u32, y: u32, src: &DynamicImage) -> bool {
     return color_dist(&src.get_pixel(x, y), &DETECT_COLOR) <= THRESHOLD;
 }
 
-fn dfs(x: u32, y: u32, src: &DynamicImage, visited: &mut Vec<Vec<bool>>, img: &mut DynamicImage) {
+fn dfs(
+    x: u32,
+    y: u32,
+    src: &DynamicImage,
+    visited: &mut Vec<Vec<bool>>,
+    img: &mut DynamicImage,
+) -> u32 {
     // u32 (unsigned 32 bit) wraps to really large when < 0, so no need to check for x < 0 or y < 0
     if x >= src.width() || y >= src.height() || visited[x as usize][y as usize] {
-        return;
+        return 0;
     }
 
+    let mut marked: u32 = 0;
     visited[x as usize][y as usize] = true;
     if should_detect(x, y, src) {
         img.put_pixel(x, y, BLACK);
+        marked += 1;
         for r in 0..4 {
             let (nx, ny) = ((x as i32 + D4X[r]) as u32, (y as i32 + D4Y[r]) as u32);
-            dfs(nx, ny, src, visited, img);
+            marked += dfs(nx, ny, src, visited, img);
         }
     }
+    return marked;
 }
 
 fn get_shapes(src: DynamicImage) -> Vec<DynamicImage> {
@@ -317,8 +328,11 @@ fn get_shapes(src: DynamicImage) -> Vec<DynamicImage> {
                         img.put_pixel(x, y, WHITE);
                     }
                 }
-                dfs(x, y, &src, &mut visited, &mut img);
-                result.push(img);
+                if dfs(x, y, &src, &mut visited, &mut img) as f64
+                    > (src.width() * src.height()) as f64 * MIN_PIXEL_AMOUNT
+                {
+                    result.push(img);
+                }
             }
         }
     }
