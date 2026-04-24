@@ -3,13 +3,13 @@ Rust hough transform + floodfill single stroke detection
 To run:
 
 ``
-cargo run -- <input file> <output filepath> 1 1 <thickness>
+cargo run -- <input file> <output filepath> 1 1 <offset>
 ``
 
-Make ``<thickness>`` larger to detect less lines, smaller for more
+Make ``<offset>`` larger to detect more lines, smaller for less
 
 
-ex: Run on black circle
+ex: Run on bullseye (input.png)
 ``
-cargo run -- data/circle.png data/ 1 1 520
+cargo run -- data/input.png data/ 1 1 50
 ``

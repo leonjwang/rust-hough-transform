@@ -8,9 +8,25 @@ use std::path::PathBuf;
 use std::process;
 use std::str::FromStr;
 
+use image::DynamicImage;
+use image::GenericImage;
 use image::{GenericImageView, ImageBuffer, Rgb, Rgba};
 use imageproc::drawing::draw_line_segment_mut;
 use nalgebra as na;
+
+const DETECT_COLOR: Rgba<u8> = Rgba([255, 0, 0, 255]); // TODO: Command Line Args?
+const THRESHOLD: f64 = 10.0;
+
+const LINE_COLOR: Rgba<u8> = Rgba([255, 0, 0, 255]);
+const WHITE: Rgba<u8> = Rgba([255, 255, 255, 255]);
+const BLACK: Rgba<u8> = Rgba([0, 0, 0, 255]);
+
+fn color_dist(c1: &Rgba<u8>, c2: &Rgba<u8>) -> f64 {
+    return ((c1[0] as f64 - c2[0] as f64).powi(2)
+        + (c1[1] as f64 - c2[1] as f64).powi(2)
+        + (c1[2] as f64 - c2[2] as f64).powi(2))
+    .sqrt();
+}
 
 #[inline]
 fn deg2rad(deg: u32, axis_size: u32) -> f64 {
@@ -33,7 +49,7 @@ fn matrix_max<T: Copy + std::cmp::Ord>(matrix: &na::DMatrix<T>) -> Option<T> {
     matrix.iter().max().copied()
 }
 
-fn dump_houghspace(accumulator: &na::DMatrix<u32>, houghspace_img_path: &PathBuf) {
+fn dump_houghspace(accumulator: &na::DMatrix<u32>, houghspace_img_path: PathBuf) {
     let max_accumulator_value = matrix_max(accumulator).unwrap_or(0);
 
     println!("# max accumulator value: {}", max_accumulator_value);
@@ -68,7 +84,7 @@ fn dump_line_visualization(
     accumulator: &na::DMatrix<u32>,
     theta_axis_scale_factor: u32,
     houghspace_filter_threshold: u32,
-    line_visualization_img_path: &PathBuf,
+    line_visualization_img_path: PathBuf,
 ) {
     let (img_width, img_height) = img.dimensions();
 
@@ -103,8 +119,6 @@ fn dump_line_visualization(
 
     println!("# detected lines: {}", lines.len());
 
-    let white = Rgba([255u8, 0u8, 0u8, 255u8]);
-
     for (_, line_coordinates) in lines {
         let clipped_line_coordinates = clip_line_liang_barsky(
             (0, (img_width - 1) as i32, 0, (img_height - 1) as i32),
@@ -123,7 +137,7 @@ fn dump_line_visualization(
                 clipped_line_coordinates.2 as f32,
                 (img_height as f32) - 1.0 - clipped_line_coordinates.3 as f32,
             ),
-            white,
+            LINE_COLOR,
         );
     }
 
@@ -266,6 +280,50 @@ fn hough_transform(
         )
 }
 
+const D4X: [i32; 4] = [1, 0, -1, 0];
+const D4Y: [i32; 4] = [0, 1, 0, -1];
+
+fn should_detect(x: u32, y: u32, src: &DynamicImage) -> bool {
+    return color_dist(&src.get_pixel(x, y), &DETECT_COLOR) <= THRESHOLD;
+}
+
+fn dfs(x: u32, y: u32, src: &DynamicImage, visited: &mut Vec<Vec<bool>>, img: &mut DynamicImage) {
+    // u32 (unsigned 32 bit) wraps to really large when < 0, so no need to check for x < 0 or y < 0
+    if x >= src.width() || y >= src.height() || visited[x as usize][y as usize] {
+        return;
+    }
+
+    visited[x as usize][y as usize] = true;
+    if should_detect(x, y, src) {
+        img.put_pixel(x, y, BLACK);
+        for r in 0..4 {
+            let (nx, ny) = ((x as i32 + D4X[r]) as u32, (y as i32 + D4Y[r]) as u32);
+            dfs(nx, ny, src, visited, img);
+        }
+    }
+}
+
+fn get_shapes(src: DynamicImage) -> Vec<DynamicImage> {
+    let mut visited = vec![vec![false; src.height() as usize]; src.width() as usize];
+    let mut result: Vec<DynamicImage> = vec![];
+    for x in 0..src.width() {
+        for y in 0..src.height() {
+            if !visited[x as usize][y as usize] && should_detect(x, y, &src) {
+                let mut img = DynamicImage::new_rgba8(src.width(), src.height());
+                // I love double nested loops n^4 yippee
+                for x in 0..src.width() {
+                    for y in 0..src.height() {
+                        img.put_pixel(x, y, WHITE);
+                    }
+                }
+                dfs(x, y, &src, &mut visited, &mut img);
+                result.push(img);
+            }
+        }
+    }
+    return result;
+}
+
 fn main() {
     let args = env::args().skip(1).collect::<Vec<_>>();
 
@@ -277,35 +335,50 @@ fn main() {
     }
 
     let input_img_path = PathBuf::from(args[0].to_string());
-    let houghspace_img_path = PathBuf::from(args[1].to_string()).join(format!(
-        "{}-space.png",
-        input_img_path.file_name().unwrap().to_string_lossy()
-    ));
-    let line_visualization_img_path = PathBuf::from(args[1].to_string()).join(format!(
-        "{}-lines.png",
-        input_img_path.file_name().unwrap().to_string_lossy()
-    ));
 
     let theta_axis_scale_factor =
         u32::from_str(&args[2]).expect("ERROR 'theta_axis_scale_factor' argument not a number.");
     let rho_axis_scale_factor =
         u32::from_str(&args[3]).expect("ERROR 'rho_axis_scale_factor' argument not a number.");
-    let houghspace_filter_threshold = u32::from_str(&args[4])
+    let houghspace_filter_offset = u32::from_str(&args[4])
         .expect("ERROR 'houghspace_filter_threshold' argument not a number.");
 
-    let mut img = image::open(&input_img_path).expect("ERROR: input file not found.");
+    let src = image::open(&input_img_path).expect("ERROR: input file not found.");
+    let mut shapes: Vec<DynamicImage> = get_shapes(src);
 
-    let accu = hough_transform(&img, theta_axis_scale_factor, rho_axis_scale_factor);
+    for (i, img) in shapes.iter_mut().enumerate() {
+        img.save(PathBuf::from(args[1].to_string()).join(format!(
+            "{0}-{1}.png",
+            input_img_path.file_name().unwrap().to_string_lossy(),
+            i
+        )))
+        .unwrap();
 
-    dump_houghspace(&accu, &houghspace_img_path);
+        let accu = hough_transform(&img, theta_axis_scale_factor, rho_axis_scale_factor);
 
-    dump_line_visualization(
-        &mut img,
-        &accu,
-        theta_axis_scale_factor,
-        houghspace_filter_threshold,
-        &line_visualization_img_path,
-    );
+        dump_houghspace(
+            &accu,
+            PathBuf::from(args[1].to_string()).join(format!(
+                "{0}-{1}-space.png",
+                input_img_path.file_name().unwrap().to_string_lossy(),
+                i
+            )),
+        );
+
+        let max_accumulator_value = matrix_max(&accu).unwrap_or(0);
+
+        dump_line_visualization(
+            img,
+            &accu,
+            theta_axis_scale_factor,
+            (max_accumulator_value as i32 - houghspace_filter_offset as i32).max(0) as u32,
+            PathBuf::from(args[1].to_string()).join(format!(
+                "{0}-{1}-lines.png",
+                input_img_path.file_name().unwrap().to_string_lossy(),
+                i
+            )),
+        );
+    }
 }
 
 // -- utility functions --
