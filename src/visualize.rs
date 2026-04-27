@@ -1,5 +1,5 @@
 use image::Rgba;
-use imageproc::drawing::{Canvas, draw_line_segment_mut};
+use imageproc::drawing::draw_line_segment_mut;
 
 // fn dump_houghspace(accumulator: &na::DMatrix<u32>, houghspace_img_path: PathBuf) {
 //     let max_accumulator_value = matrix_max(accumulator).unwrap_or(0);
@@ -33,58 +33,40 @@ use imageproc::drawing::{Canvas, draw_line_segment_mut};
 
 use std::path::PathBuf;
 
-use crate::arithmetic;
-use crate::arithmetic::deg2rad;
+// use crate::arithmetic::deg2rad;
 
 const LINE_COLOR: Rgba<u8> = Rgba([255, 0, 0, 255]);
 
+use image::GenericImageView;
+
 pub fn dump_line_visualization(
     img: &mut image::DynamicImage,
-    accumulator: &nalgebra::DMatrix<u32>,
-    theta_axis_scale_factor: u32,
-    houghspace_filter_threshold: u32,
+    lines_rho_theta: &[(f64, f64)], // idiomatic slice instead of &Vec
     line_visualization_img_path: PathBuf,
 ) {
     let (img_width, img_height) = img.dimensions();
 
-    let theta_axis_size = accumulator.nrows();
-    let rho_axis_size = accumulator.ncols();
-    let rho_axis_half = ((rho_axis_size as f64) / 2.0).round();
-    let max_line_length = arithmetic::calculate_max_line_length(img_width, img_height);
-
     let mut lines = vec![];
 
-    for theta in 0..theta_axis_size {
-        for rho_scaled in 0..rho_axis_size {
-            let val = accumulator[(theta as usize, rho_scaled as usize)];
+    // Notice we no longer need the theta_axis_scale_factor!
+    for &(rho, theta_rad) in lines_rho_theta {
+        let line_coordinates = line_from_rho_theta(rho, theta_rad, img_width, img_height);
 
-            if val < houghspace_filter_threshold {
-                continue;
-            }
-
-            let rho = (rho_scaled as f64 - rho_axis_half) * max_line_length / rho_axis_half;
-
-            let line_coordinates = line_from_rho_theta(
-                theta as u32,
-                theta_axis_scale_factor,
-                rho as f64,
-                img_width,
-                img_height,
-            );
-
-            lines.push((theta, line_coordinates));
-        }
+        lines.push(line_coordinates);
     }
 
     println!("# detected lines: {}", lines.len());
 
-    for (_, line_coordinates) in lines {
+    for line_coordinates in lines {
         let res = clip_line_liang_barsky(
             (0, (img_width - 1) as i32, 0, (img_height - 1) as i32),
             line_coordinates,
         );
 
         if let Some(clipped_line_coordinates) = res {
+            // Define LINE_COLOR here, or ensure it's in scope.
+            // e.g., let LINE_COLOR = image::Rgba([255u8, 0u8, 0u8, 255u8]);
+
             draw_line_segment_mut(
                 img,
                 // be sure to not overflow height
@@ -96,7 +78,7 @@ pub fn dump_line_visualization(
                     clipped_line_coordinates.2 as f32,
                     (img_height as f32) - 1.0 - clipped_line_coordinates.3 as f32,
                 ),
-                LINE_COLOR,
+                LINE_COLOR, // Make sure this constant exists in your file
             );
         }
     }
@@ -106,68 +88,27 @@ pub fn dump_line_visualization(
 }
 
 fn line_from_rho_theta(
-    theta: u32,
-    theta_axis_scale_factor: u32,
     rho: f64,
+    theta_rad: f64,
     img_width: u32,
     img_height: u32,
 ) -> (i32, i32, i32, i32) {
-    let mut p1_x = 0.0_f64;
-    let mut p1_y = 0.0_f64;
+    let a = theta_rad.cos();
+    let b = theta_rad.sin();
 
-    let mut p2_x = 0.0_f64;
-    let mut p2_y = 0.0_f64;
+    // (x0, y0) is the point on the line closest to the origin
+    let x0 = a * rho;
+    let y0 = b * rho;
 
-    // here we scale theta back to "base 180", if theta scale factor was > 1
-    let theta = (theta as f64 / theta_axis_scale_factor as f64).round();
-    let theta_axis_size = 180;
+    // A length guaranteed to span completely across the image
+    let length = ((img_width as f64).hypot(img_height as f64)) * 2.0;
 
-    let alpha = theta % 90.0;
-    let beta = 90.0 - alpha;
+    // Extend outward from (x0, y0) in both directions using the tangent vector (-b, a)
+    let p1_x = x0 + length * (-b);
+    let p1_y = y0 + length * (a);
 
-    // special cases - line is parallel to x/y axis
-    if theta == 0.0 || theta == 180.0 {
-        p1_x = rho.abs();
-        p1_y = img_height as f64;
-
-        p2_x = rho.abs();
-        p2_y = 0.0;
-    } else if theta == 90.0 {
-        p1_x = 0.0;
-        p1_y = rho.abs();
-
-        p2_x = img_width as f64;
-        p2_y = rho.abs();
-        // otherwise use law of sines to get lines
-    } else if theta > 0.0 && theta < 90.0 {
-        // start
-        p1_x = 0.0;
-        p1_y = rho.abs() / deg2rad(theta as u32, theta_axis_size).sin();
-
-        // end
-        p2_x = rho.abs() / deg2rad(beta as u32, theta_axis_size).sin();
-        p2_y = 0.0;
-    } else if theta > 90.0 && theta < 180.0 {
-        // start
-        if rho < 0.0 {
-            p1_x = rho.abs() / deg2rad(alpha as u32, theta_axis_size).sin();
-        } else {
-            p1_x = rho.abs() * -1.0 / deg2rad(alpha as u32, theta_axis_size).sin();
-        }
-
-        p1_y = 0.0;
-
-        // end
-        p2_x = img_width as f64;
-
-        if rho < 0.0 {
-            p2_y = (img_width as f64 - p1_x.abs()) * deg2rad(alpha as u32, theta_axis_size).sin()
-                / deg2rad(beta as u32, theta_axis_size).sin();
-        } else {
-            p2_y = (img_width as f64 + p1_x.abs()) * deg2rad(alpha as u32, theta_axis_size).sin()
-                / deg2rad(beta as u32, theta_axis_size).sin();
-        }
-    }
+    let p2_x = x0 - length * (-b);
+    let p2_y = y0 - length * (a);
 
     (
         p1_x.round() as i32,

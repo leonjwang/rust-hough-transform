@@ -4,7 +4,7 @@ use imageproc::drawing::Canvas;
 const WHITE: Rgba<u8> = Rgba([255, 255, 255, 255]);
 const BLACK: Rgba<u8> = Rgba([0, 0, 0, 255]);
 
-const DETECT_COLOR: Rgba<u8> = Rgba([255, 0, 0, 255]); // TODO: Dynamicly detect this from image
+const DETECT_COLOR: Rgba<u8> = Rgba([255, 0, 0, 255]); // TODO: Dynamicly detect this from image (reddest point?s)
 const THRESHOLD: f64 = 50.0;
 
 const MIN_PIXEL_AMOUNT: f64 = 0.01;

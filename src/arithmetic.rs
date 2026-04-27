@@ -1,3 +1,6 @@
+use std::f64::consts::PI;
+
+use image::DynamicImage;
 use imageproc::drawing::Canvas;
 
 #[inline]
@@ -78,4 +81,67 @@ pub fn hough_transform(
                 accu
             },
         )
+}
+
+pub fn get_lines(
+    img: &DynamicImage,
+    accumulator: &nalgebra::DMatrix<u32>,
+    houghspace_filter_threshold: u32,
+) -> Vec<(f64, f64)> {
+    let (img_width, img_height) = img.dimensions();
+
+    let theta_axis_size = accumulator.nrows();
+    let rho_axis_size = accumulator.ncols();
+    let rho_axis_half = ((rho_axis_size as f64) / 2.0).round();
+    let max_line_length = calculate_max_line_length(img_width, img_height);
+
+    let mut lines_rho_theta = vec![];
+
+    for theta in 0..theta_axis_size {
+        for rho_scaled in 0..rho_axis_size {
+            let val = accumulator[(theta as usize, rho_scaled as usize)];
+
+            if val < houghspace_filter_threshold {
+                continue;
+            }
+
+            let rho = (rho_scaled as f64 - rho_axis_half) * max_line_length / rho_axis_half;
+
+            let theta = (theta as f64) * (PI / theta_axis_size as f64);
+
+            lines_rho_theta.push((rho, theta as f64));
+        }
+    }
+
+    lines_rho_theta
+}
+
+// Thank you gemini
+pub fn estimate_center(lines: &Vec<(f64, f64)>) -> (f64, f64, f64) {
+    let n = lines.len();
+
+    let mut a_matrix = nalgebra::DMatrix::<f64>::zeros(n, 3);
+    let mut b_vector = nalgebra::DVector::<f64>::zeros(n);
+
+    for (i, &(rho, theta)) in lines.iter().enumerate() {
+        a_matrix[(i, 0)] = theta.cos();
+        a_matrix[(i, 1)] = theta.sin();
+        a_matrix[(i, 2)] = 1.0; // The constant C (representing radius)
+        b_vector[i] = rho;
+    }
+
+    // Solve Ax = B using SVD for Least Squares
+    // This finds the best fit x_c, y_c, and C across all your tangent lines
+    let svd = nalgebra::SVD::new(a_matrix, true, true);
+    let solution = svd
+        .solve(&b_vector, 1e-6)
+        .expect("Failed to solve the linear system");
+
+    let x_center = solution[0];
+    let y_center = solution[1];
+
+    // The radius is the absolute value of the 3rd parameter
+    let radius = solution[2].abs();
+
+    (x_center, y_center, radius)
 }

@@ -2,7 +2,10 @@ use std::path::PathBuf;
 
 use image::DynamicImage;
 
-use crate::visualize::dump_line_visualization;
+use crate::{
+    arithmetic::{estimate_center, get_lines},
+    visualize::dump_line_visualization,
+};
 
 mod arithmetic;
 mod preprocess;
@@ -43,16 +46,28 @@ pub fn detect_center(
 
         let max_accumulator_value = matrix_max(&accu).unwrap_or(0);
 
+        let lines = get_lines(
+            &img,
+            &accu,
+            max_accumulator_value - houghspace_filter_offset,
+        );
+
         dump_line_visualization(
             img,
-            &accu,
-            theta_axis_scale_factor,
-            (max_accumulator_value as i32 - houghspace_filter_offset as i32).max(0) as u32,
+            &lines,
             PathBuf::from("out").join(format!(
                 "{0}-{1}-lines.png",
                 input_path.file_name().unwrap().to_string_lossy(),
                 i
             )),
+        );
+
+        let center = estimate_center(&lines);
+
+        println!(
+            "Center for image {0} found at {1}",
+            i,
+            format!("Center at: {:?}", center)
         );
     }
 }
