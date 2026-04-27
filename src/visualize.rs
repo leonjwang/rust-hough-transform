@@ -1,5 +1,5 @@
 use image::Rgba;
-use imageproc::drawing::draw_line_segment_mut;
+use imageproc::drawing::{draw_hollow_circle_mut, draw_line_segment_mut};
 
 // fn dump_houghspace(accumulator: &na::DMatrix<u32>, houghspace_img_path: PathBuf) {
 //     let max_accumulator_value = matrix_max(accumulator).unwrap_or(0);
@@ -36,14 +36,17 @@ use std::path::PathBuf;
 // use crate::arithmetic::deg2rad;
 
 const LINE_COLOR: Rgba<u8> = Rgba([255, 0, 0, 255]);
+const CIRCLE_COLOR: Rgba<u8> = Rgba([0, 255, 0, 255]);
 
 use image::GenericImageView;
 
 pub fn dump_line_visualization(
-    img: &mut image::DynamicImage,
+    img: &image::DynamicImage,
     lines_rho_theta: &[(f64, f64)], // idiomatic slice instead of &Vec
     line_visualization_img_path: PathBuf,
 ) {
+    let mut img = img.clone();
+
     let (img_width, img_height) = img.dimensions();
 
     let mut lines = vec![];
@@ -68,7 +71,7 @@ pub fn dump_line_visualization(
             // e.g., let LINE_COLOR = image::Rgba([255u8, 0u8, 0u8, 255u8]);
 
             draw_line_segment_mut(
-                img,
+                &mut img,
                 // be sure to not overflow height
                 (
                     clipped_line_coordinates.0 as f32,
@@ -187,4 +190,22 @@ fn clip_line_liang_barsky(
         x1clip.round() as i32,
         y1clip.round() as i32,
     ))
+}
+
+pub fn dump_circle(
+    img: &image::DynamicImage,
+    data: (f64, f64, f64),
+    circle_visualization_image_path: PathBuf,
+) {
+    let mut img = img.clone();
+
+    draw_hollow_circle_mut(
+        &mut img,
+        (data.0 as i32, data.1 as i32),
+        data.2 as i32,
+        CIRCLE_COLOR,
+    );
+
+    img.save(circle_visualization_image_path)
+        .expect("Failed to save line visualization image");
 }

@@ -21,10 +21,46 @@ fn rgb_to_greyscale(r: u8, g: u8, b: u8) -> u8 {
 }
 
 #[inline]
-fn is_edge(pixel: &image::Rgba<u8>) -> bool {
-    // channels() is deprecated. We can index directly into the Rgba array.
+fn is_edge(img: &image::DynamicImage, x: u32, y: u32) -> bool {
+    let pixel = img.get_pixel(x, y);
     let greyscale_value = rgb_to_greyscale(pixel[0], pixel[1], pixel[2]);
-    greyscale_value < 1
+
+    // If it's not black, it's not an edge
+    if greyscale_value >= 1 {
+        return false;
+    }
+
+    // Safety check for image borders
+    let (w, h) = img.dimensions();
+    if x == 0 || y == 0 || x == w - 1 || y == h - 1 {
+        return false;
+    }
+
+    return true;
+
+    // Check the 4 neighbors. If any neighbor is white (> 1), we are on the boundary!
+    // let up = rgb_to_greyscale(
+    //     img.get_pixel(x, y - 1)[0],
+    //     img.get_pixel(x, y - 1)[1],
+    //     img.get_pixel(x, y - 1)[2],
+    // );
+    // let down = rgb_to_greyscale(
+    //     img.get_pixel(x, y + 1)[0],
+    //     img.get_pixel(x, y + 1)[1],
+    //     img.get_pixel(x, y + 1)[2],
+    // );
+    // let left = rgb_to_greyscale(
+    //     img.get_pixel(x - 1, y)[0],
+    //     img.get_pixel(x - 1, y)[1],
+    //     img.get_pixel(x - 1, y)[2],
+    // );
+    // let right = rgb_to_greyscale(
+    //     img.get_pixel(x + 1, y)[0],
+    //     img.get_pixel(x + 1, y)[1],
+    //     img.get_pixel(x + 1, y)[2],
+    // );
+
+    // up > 1 || down > 1 || left > 1 || right > 1
 }
 
 #[inline]
@@ -67,7 +103,7 @@ pub fn hough_transform(
 
     pixel_coords
         .iter()
-        .filter(|&&(x, y)| is_edge(&img.get_pixel(x, y)))
+        .filter(|&&(x, y)| is_edge(&img, x, y))
         .map(|&coords| invert_y(img.height(), &coords))
         .flat_map(|coords| {
             (0..theta_axis_size)
@@ -116,8 +152,7 @@ pub fn get_lines(
     lines_rho_theta
 }
 
-// Thank you gemini
-pub fn estimate_center(lines: &Vec<(f64, f64)>) -> (f64, f64, f64) {
+pub fn estimate_center(lines: &[(f64, f64)], img_height: u32) -> (f64, f64, f64) {
     let n = lines.len();
 
     let mut a_matrix = nalgebra::DMatrix::<f64>::zeros(n, 3);
@@ -126,22 +161,32 @@ pub fn estimate_center(lines: &Vec<(f64, f64)>) -> (f64, f64, f64) {
     for (i, &(rho, theta)) in lines.iter().enumerate() {
         a_matrix[(i, 0)] = theta.cos();
         a_matrix[(i, 1)] = theta.sin();
-        a_matrix[(i, 2)] = 1.0; // The constant C (representing radius)
+        a_matrix[(i, 2)] = 1.0;
         b_vector[i] = rho;
     }
 
-    // Solve Ax = B using SVD for Least Squares
-    // This finds the best fit x_c, y_c, and C across all your tangent lines
+    // 1. SVD finds the mathematical center (Cartesian space)
     let svd = nalgebra::SVD::new(a_matrix, true, true);
     let solution = svd
         .solve(&b_vector, 1e-6)
         .expect("Failed to solve the linear system");
 
     let x_center = solution[0];
-    let y_center = solution[1];
+    let y_center_cartesian = solution[1];
 
-    // The radius is the absolute value of the 3rd parameter
-    let radius = solution[2].abs();
+    // 2. Calculate the true radius (Must use Cartesian Y to match the lines)
+    let mut distances: Vec<f64> = lines
+        .iter()
+        .map(|&(rho, theta)| {
+            (x_center * theta.cos() + y_center_cartesian * theta.sin() - rho).abs()
+        })
+        .collect();
 
-    (x_center, y_center, radius)
+    distances.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let true_radius = distances[distances.len() / 2];
+
+    // 3. Un-invert Y back to Screen space (Top-Left origin)
+    let y_center_image = (img_height as f64) - 1.0 - y_center_cartesian;
+
+    (x_center, y_center_image, true_radius)
 }

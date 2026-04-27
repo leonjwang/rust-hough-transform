@@ -4,7 +4,7 @@ use image::DynamicImage;
 
 use crate::{
     arithmetic::{estimate_center, get_lines},
-    visualize::dump_line_visualization,
+    visualize::{dump_circle, dump_line_visualization},
 };
 
 mod arithmetic;
@@ -46,10 +46,13 @@ pub fn detect_center(
 
         let max_accumulator_value = matrix_max(&accu).unwrap_or(0);
 
+        // Print max accumulator value
+        println!("Max accumulator value: {:?}", max_accumulator_value);
+
         let lines = get_lines(
             &img,
             &accu,
-            max_accumulator_value - houghspace_filter_offset,
+            (max_accumulator_value as i32 - houghspace_filter_offset as i32).max(0) as u32,
         );
 
         dump_line_visualization(
@@ -62,12 +65,22 @@ pub fn detect_center(
             )),
         );
 
-        let center = estimate_center(&lines);
+        let center = estimate_center(&lines, img.height());
 
         println!(
             "Center for image {0} found at {1}",
             i,
             format!("Center at: {:?}", center)
         );
+
+        dump_circle(
+            img,
+            center,
+            PathBuf::from("out").join(format!(
+                "{0}-{1}-center.png",
+                input_path.file_name().unwrap().to_string_lossy(),
+                i
+            )),
+        )
     }
 }
