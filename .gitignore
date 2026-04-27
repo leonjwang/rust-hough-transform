@@ -1,5 +1,7 @@
 target
 
+/out/
+
 # -*- mode: gitignore; -*-
 *~
 \#*\#

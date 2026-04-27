@@ -4,7 +4,7 @@ use image::DynamicImage;
 
 use crate::visualize::dump_line_visualization;
 
-mod hough_transform;
+mod arithmetic;
 mod preprocess;
 mod visualize;
 
@@ -30,7 +30,7 @@ pub fn detect_center(
         .unwrap();
 
         let accu =
-            hough_transform::hough_transform(&img, theta_axis_scale_factor, rho_axis_scale_factor);
+            arithmetic::hough_transform(&img, theta_axis_scale_factor, rho_axis_scale_factor);
 
         // dump_houghspace(
         //     &accu,

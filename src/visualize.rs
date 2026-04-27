@@ -33,8 +33,8 @@ use imageproc::drawing::{Canvas, draw_line_segment_mut};
 
 use std::path::PathBuf;
 
-use crate::hough_transform;
-use crate::hough_transform::deg2rad;
+use crate::arithmetic;
+use crate::arithmetic::deg2rad;
 
 const LINE_COLOR: Rgba<u8> = Rgba([255, 0, 0, 255]);
 
@@ -50,7 +50,7 @@ pub fn dump_line_visualization(
     let theta_axis_size = accumulator.nrows();
     let rho_axis_size = accumulator.ncols();
     let rho_axis_half = ((rho_axis_size as f64) / 2.0).round();
-    let max_line_length = hough_transform::calculate_max_line_length(img_width, img_height);
+    let max_line_length = arithmetic::calculate_max_line_length(img_width, img_height);
 
     let mut lines = vec![];
 
